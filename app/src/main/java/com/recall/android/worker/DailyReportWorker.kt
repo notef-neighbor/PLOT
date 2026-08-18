@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -36,17 +37,27 @@ class DailyReportWorker(
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val memories = container.historyRepository.memoriesBetween(start, end)
-            .filterNot { it.source.startsWith("daily_") }
+            .filter { !it.source.startsWith("daily_") && !it.source.startsWith("rollup_") }
 
         return runCatching {
             val local = buildLocalReport(date, memories)
+            val rollups = HistoryRollupWorker.buildDay(applicationContext, date, memories, zone)
+            container.historyRepository.replaceDerivedMemories(
+                sources = SixHourRollup.DERIVED_SOURCES,
+                start = start,
+                end = end,
+                memories = rollups,
+            )
+            val reportEvidence = rollups.ifEmpty { memories }
             val generatedText = if (memories.isNotEmpty() && hasCodexAuth()) {
                 runCatching {
                     container.codexRuntime.askHistory(
                         question = buildPrompt(date, local),
-                        memories = memories,
+                        memories = reportEvidence,
+                        reasoningEffort = "medium",
                     )
-                }.getOrDefault(local)
+                }.onFailure { Log.w(TAG, "Codex daily report failed; using local report", it) }
+                    .getOrDefault(local)
             } else {
                 local
             }
@@ -155,5 +166,6 @@ class DailyReportWorker(
         const val KEY_REPORT_DATE = "report_date"
         private const val CHANNEL_ID = "recall_daily_report"
         private const val NOTIFICATION_ID = 4201
+        private const val TAG = "DailyReportWorker"
     }
 }

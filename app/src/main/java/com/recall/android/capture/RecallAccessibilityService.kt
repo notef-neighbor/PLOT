@@ -9,22 +9,43 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
 class RecallAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var notfBotController: NotfBotController? = null
     private val contentCaptureThrottle = ContentCaptureThrottle(CONTENT_CAPTURE_INTERVAL_MS)
+    private val captureQueue = Channel<AccessibilityEvent>(
+        capacity = CAPTURE_QUEUE_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        onUndeliveredElement = ::recycleEvent,
+    )
+
+    init {
+        serviceScope.launch {
+            for (event in captureQueue) {
+                try {
+                    captureEventInBackground(event)
+                } catch (error: Throwable) {
+                    android.util.Log.w("RecallCapture", "Skipped malformed accessibility event", error)
+                } finally {
+                    recycleEvent(event)
+                }
+            }
+        }
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        runCatching { captureEvent(event) }
+        runCatching { enqueueCapture(event) }
             .onFailure { error ->
                 android.util.Log.w("RecallCapture", "Skipped malformed accessibility event", error)
             }
     }
 
-    private fun captureEvent(event: AccessibilityEvent) {
+    private fun enqueueCapture(event: AccessibilityEvent) {
         val container = (application as RecallApplication).container
         val settings = container.settings.state.value
         if (!settings.disclosureAccepted || settings.collectionPaused) return
@@ -48,19 +69,35 @@ class RecallAccessibilityService : AccessibilityService() {
             val controller = notfBotController ?: NotfBotController(this, container, serviceScope)
                 .also { notfBotController = it }
             if (controller.handleTextChange(event) {
-                    collectVisibleContent(event.source ?: rootInActiveWindow)
+                    collectVisibleContent(contentRoot(event.source, rootInActiveWindow, packageName))
                         .distinct()
                         .joinToString(" | ")
                 }
             ) return
         }
 
+        @Suppress("DEPRECATION")
+        val copy = AccessibilityEvent.obtain(event)
+        captureQueue.trySend(copy)
+    }
+
+    private suspend fun captureEventInBackground(event: AccessibilityEvent) {
+        val container = (application as RecallApplication).container
+        val settings = container.settings.state.value
+        if (!settings.disclosureAccepted || settings.collectionPaused) return
+
+        val packageName = event.packageName?.toString() ?: return
+        if (packageName !in settings.allowedPackages) return
+        val label = runCatching {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+        }.getOrDefault(packageName.substringAfterLast('.'))
+
         val source = event.source
         val eventText = (event.text.mapNotNull { value -> value?.toString() } + listOfNotNull(
             event.beforeText?.toString(),
             event.contentDescription?.toString(),
         )).filter(String::isNotBlank)
-        val treeText = collectVisibleContent(source ?: rootInActiveWindow)
+        val treeText = collectVisibleContent(contentRoot(source, rootInActiveWindow, packageName))
         val rawText = (eventText + treeText).distinct().joinToString(" | ").takeIf(String::isNotBlank)
 
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
@@ -92,23 +129,37 @@ class RecallAccessibilityService : AccessibilityService() {
             null
         }
 
-        serviceScope.launch {
-            container.historyRepository.record(
-                raw.copy(
-                    text = decision.sanitizedText,
-                    contentRedacted = decision.contentRedacted,
-                ),
-                stableKey = stableKey,
-            )
-        }
+        container.historyRepository.record(
+            raw.copy(
+                text = decision.sanitizedText,
+                contentRedacted = decision.contentRedacted,
+            ),
+            stableKey = stableKey,
+        )
     }
 
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         notfBotController?.dispose()
+        captureQueue.close()
         serviceScope.coroutineContext[Job]?.cancel()
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleEvent(event: AccessibilityEvent) {
+        event.recycle()
+    }
+
+    private fun contentRoot(
+        source: AccessibilityNodeInfo?,
+        activeRoot: AccessibilityNodeInfo?,
+        eventPackage: String,
+    ): AccessibilityNodeInfo? = when {
+        AccessibilityCapturePolicy.belongsToEventPackage(eventPackage, source?.packageName) -> source
+        AccessibilityCapturePolicy.belongsToEventPackage(eventPackage, activeRoot?.packageName) -> activeRoot
+        else -> null
     }
 
     private fun eventTypeName(type: Int): String = when (type) {
@@ -137,7 +188,6 @@ class RecallAccessibilityService : AccessibilityService() {
                     node.text?.toString(),
                     node.contentDescription?.toString(),
                     node.hintText?.toString(),
-                    node.viewIdResourceName,
                 ).map { it.replace(Regex("\\s+"), " ").trim() }.filter(String::isNotBlank)
                 values.forEach { value ->
                     if (characters + value.length <= MAX_CHARACTERS) {
@@ -158,5 +208,6 @@ class RecallAccessibilityService : AccessibilityService() {
         private const val MAX_CHARACTERS = 8_000
         private const val CONTENT_CAPTURE_INTERVAL_MS = 2_000L
         private const val CONTENT_DEDUP_WINDOW_MS = 60_000L
+        private const val CAPTURE_QUEUE_CAPACITY = 128
     }
 }

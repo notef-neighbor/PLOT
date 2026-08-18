@@ -358,7 +358,9 @@ private fun TimelineScreen(state: MainUiState, onDelete: (String) -> Unit, paddi
         }
         item { RecentActivityCard(state.recentActivities) }
         if (state.memories.isEmpty()) {
-            item { EmptyTimeline() }
+            item {
+                if (state.recentActivities.isEmpty()) EmptyTimeline() else ProcessingTimeline()
+            }
         } else {
             items(state.memories, key = { it.id }) { memory -> MemoryCard(memory, onDelete) }
         }
@@ -408,7 +410,7 @@ private fun eventKindLabel(kind: String): String = when (kind) {
     "content_changed" -> stringResource(R.string.event_content_change)
     "notification" -> stringResource(R.string.event_notification)
     "calendar_event" -> stringResource(R.string.event_calendar)
-    "window_state_changed", "windows_changed" -> stringResource(R.string.event_screen)
+    "window_changed", "window_state_changed", "windows_changed" -> stringResource(R.string.event_screen)
     else -> kind
 }
 
@@ -448,6 +450,18 @@ private fun EmptyTimeline() {
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.timeline_empty_title), fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Text(stringResource(R.string.timeline_empty_body), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun ProcessingTimeline() {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.timeline_processing_title), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text(stringResource(R.string.timeline_processing_body), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }
@@ -506,7 +520,7 @@ private fun AskScreen(
     onConnectChatGpt: () -> Unit,
     padding: PaddingValues,
 ) {
-    val aiConnected = state.codex.isReady ||
+    val aiConnected = state.codex.isReady || state.codex.hasStoredLogin ||
         (state.settings.gatewayUrl.isNotBlank() && state.settings.deviceToken.isNotBlank())
     Column(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
         LazyColumn(
