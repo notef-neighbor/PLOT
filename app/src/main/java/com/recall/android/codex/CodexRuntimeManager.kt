@@ -1,12 +1,14 @@
 package com.recall.android.codex
 
 import android.content.Context
+import android.content.Intent
 import com.recall.android.R
 import com.recall.android.data.HistoryMemory
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +27,8 @@ class CodexRuntimeManager(private val context: Context) {
     val state: StateFlow<CodexRuntimeState> = _state.asStateFlow()
 
     @Volatile private var process: Process? = null
+    @Volatile private var networkProxy: LocalConnectProxy? = null
+    @Volatile private var idleStopJob: Job? = null
     private val startMutex = Mutex()
 
     init {
@@ -38,19 +42,28 @@ class CodexRuntimeManager(private val context: Context) {
     }
 
     suspend fun start() = withContext(Dispatchers.IO) {
+        idleStopJob?.cancel()
+        idleStopJob = null
         startMutex.withLock {
             if (client.state.value.status == CodexRuntimeStatus.Authenticated ||
                 client.state.value.status == CodexRuntimeStatus.LoginRequired
             ) return@withLock
             val binary = binaryFile()
             check(binary.exists()) { context.getString(R.string.runtime_binary_missing) }
-            _state.value = CodexRuntimeState(CodexRuntimeStatus.Starting, message = context.getString(R.string.runtime_starting))
+            _state.value = _state.value.copy(
+                status = CodexRuntimeStatus.Starting,
+                message = context.getString(R.string.runtime_starting),
+            )
             if (process?.isAlive != true) {
+                val proxy = networkProxy ?: LocalConnectProxy().also { networkProxy = it }
                 val codexHome = File(context.filesDir, "codex-home").apply { mkdirs() }
                 val workspace = File(context.filesDir, "codex-workspace").apply { mkdirs() }
                 val temp = File(context.cacheDir, "codex-temp").apply { mkdirs() }
                 val caBundle = createAndroidCaBundle(codexHome)
                 process = ProcessBuilder(
+                    "/system/bin/nice",
+                    "-n",
+                    "10",
                     binary.absolutePath,
                     "--listen",
                     "ws://127.0.0.1:4500",
@@ -60,6 +73,10 @@ class CodexRuntimeManager(private val context: Context) {
                     environment()["CODEX_HOME"] = codexHome.absolutePath
                     environment()["TMPDIR"] = temp.absolutePath
                     environment()["SSL_CERT_FILE"] = caBundle.absolutePath
+                    environment()["HTTPS_PROXY"] = proxy.url
+                    environment()["https_proxy"] = proxy.url
+                    environment()["NO_PROXY"] = "127.0.0.1,localhost"
+                    environment()["no_proxy"] = "127.0.0.1,localhost"
                     environment()["RUST_BACKTRACE"] = "1"
                 }.start()
                 scope.launch {
@@ -100,20 +117,46 @@ class CodexRuntimeManager(private val context: Context) {
         client.logout()
     }
 
-    suspend fun askHistory(question: String, memories: List<HistoryMemory>): String {
+    suspend fun askHistory(
+        question: String,
+        memories: List<HistoryMemory>,
+        reasoningEffort: String? = null,
+    ): String {
         start()
-        return client.askHistory(
-            question = question,
-            memories = memories,
-            workspace = File(context.filesDir, "codex-workspace").apply { mkdirs() }.absolutePath,
-        )
+        return try {
+            client.askHistory(
+                question = question,
+                memories = memories,
+                workspace = File(context.filesDir, "codex-workspace").apply { mkdirs() }.absolutePath,
+                reasoningEffort = reasoningEffort,
+            )
+        } finally {
+            scheduleIdleStop()
+        }
     }
 
     fun stop() {
+        stopRuntime(cancelIdleTimer = true)
+    }
+
+    private fun stopRuntime(cancelIdleTimer: Boolean) {
+        if (cancelIdleTimer) idleStopJob?.cancel()
+        idleStopJob = null
         client.disconnect()
         process?.destroy()
         process = null
-        _state.value = CodexRuntimeState(CodexRuntimeStatus.Stopped)
+        networkProxy?.close()
+        networkProxy = null
+        _state.value = _state.value.copy(status = CodexRuntimeStatus.Stopped)
+    }
+
+    private fun scheduleIdleStop() {
+        idleStopJob?.cancel()
+        idleStopJob = scope.launch {
+            delay(IDLE_STOP_DELAY_MS)
+            stopRuntime(cancelIdleTimer = false)
+            context.stopService(Intent(context, CodexRuntimeService::class.java))
+        }
     }
 
     private fun binaryFile(): File = File(context.applicationInfo.nativeLibraryDir, "libcodex_android.so")
@@ -137,5 +180,9 @@ class CodexRuntimeManager(private val context: Context) {
         }
         check(bundle.length() > 0) { context.getString(R.string.runtime_certificates_empty) }
         return bundle
+    }
+
+    private companion object {
+        const val IDLE_STOP_DELAY_MS = 5 * 60_000L
     }
 }

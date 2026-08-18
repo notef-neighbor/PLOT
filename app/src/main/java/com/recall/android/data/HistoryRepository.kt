@@ -10,17 +10,20 @@ import com.recall.android.crypto.VaultCipher
 import com.recall.android.worker.SummarizeWorker
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 class HistoryRepository(
     private val context: Context,
     private val database: HistoryDatabase,
     private val cipher: VaultCipher,
 ) {
-    fun observeMemories(): Flow<List<HistoryMemory>> = database.memoryDao().observeAll().map { entities ->
+    fun observeMemories(): Flow<List<HistoryMemory>> = database.memoryDao().observeRecent().map { entities ->
         entities.mapNotNull(::decryptMemorySafely)
-    }
+    }.flowOn(Dispatchers.Default)
 
     fun observeTodayEventCount(): Flow<Int> {
         val startOfDay = java.time.LocalDate.now()
@@ -43,7 +46,7 @@ class HistoryRepository(
                 )
             }.getOrNull()
         }
-    }
+    }.flowOn(Dispatchers.Default)
 
     suspend fun record(interaction: CapturedInteraction, stableKey: String? = null) {
         val payload = EventPayload(
@@ -67,7 +70,7 @@ class HistoryRepository(
         scheduleSummary()
     }
 
-    suspend fun search(query: String): List<HistoryMemory> {
+    suspend fun search(query: String): List<HistoryMemory> = withContext(Dispatchers.Default) {
         val terms = HistorySearchPolicy.terms(query)
         val allSummaries = database.memoryDao().latest().mapNotNull(::decryptMemorySafely)
         val scoredSummaries = allSummaries.mapNotNull { memory ->
@@ -119,7 +122,7 @@ class HistoryRepository(
             emptyList()
         }
 
-        return candidates
+        candidates
             .distinctBy { it.id }
             .distinctBy { HistoryEvidenceFormatter.clean(it.summary).lowercase() }
             .take(MAX_SEARCH_RESULTS)
@@ -132,15 +135,21 @@ class HistoryRepository(
 
     suspend fun saveMemory(memory: HistoryMemory) {
         database.memoryDao().insert(
-            MemoryEntity(
-                id = memory.id,
-                startedAt = memory.startedAt,
-                endedAt = memory.endedAt,
-                encryptedPayload = cipher.encrypt(PayloadCodec.encodeMemory(memory)),
-                eventCount = memory.eventCount,
-                source = memory.source,
-            ),
+            memory.toEntity(),
         )
+    }
+
+    suspend fun replaceDerivedMemories(
+        sources: List<String>,
+        start: Long,
+        end: Long,
+        memories: List<HistoryMemory>,
+    ) {
+        val entities = withContext(Dispatchers.Default) { memories.map { it.toEntity() } }
+        database.withTransaction {
+            database.memoryDao().deleteBySourcesBetween(sources, start, end)
+            entities.forEach { database.memoryDao().insert(it) }
+        }
     }
 
     suspend fun clearAll() {
@@ -156,13 +165,32 @@ class HistoryRepository(
         }
     }
 
+    suspend fun prepareDerivedHistory() {
+        val preferences = context.getSharedPreferences(MAINTENANCE_PREFERENCES, Context.MODE_PRIVATE)
+        if (preferences.getInt(KEY_SUMMARY_FORMAT_VERSION, 0) >= SUMMARY_FORMAT_VERSION) return
+        database.withTransaction {
+            database.memoryDao().deleteBySources(listOf("local", "gateway"))
+            database.eventDao().markAllUnprocessed()
+        }
+        preferences.edit().putInt(KEY_SUMMARY_FORMAT_VERSION, SUMMARY_FORMAT_VERSION).commit()
+    }
+
     private fun decryptMemorySafely(entity: MemoryEntity): HistoryMemory? = runCatching {
         PayloadCodec.decodeMemory(entity, cipher.decrypt(entity.encryptedPayload))
     }.getOrNull()
 
+    private fun HistoryMemory.toEntity(): MemoryEntity = MemoryEntity(
+        id = id,
+        startedAt = startedAt,
+        endedAt = endedAt,
+        encryptedPayload = cipher.encrypt(PayloadCodec.encodeMemory(this)),
+        eventCount = eventCount,
+        source = source,
+    )
+
     private fun scheduleSummary() {
         val work = OneTimeWorkRequestBuilder<SummarizeWorker>()
-            .setInitialDelay(1, TimeUnit.MINUTES)
+            .setInitialDelay(10, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             SummarizeWorker.DEBOUNCED_WORK,
@@ -174,6 +202,9 @@ class HistoryRepository(
     companion object {
         private const val LEGACY_TIMESTAMP_CUTOFF = 1_577_836_800_000L // 2020-01-01 UTC
         private const val MAX_SEARCH_RESULTS = 8
+        private const val MAINTENANCE_PREFERENCES = "plot-history-maintenance"
+        private const val KEY_SUMMARY_FORMAT_VERSION = "summary-format-version"
+        private const val SUMMARY_FORMAT_VERSION = 2
     }
 
     private data class ScoredMemory(val memory: HistoryMemory, val score: Int)

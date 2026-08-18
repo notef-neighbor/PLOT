@@ -17,6 +17,9 @@ interface InteractionEventDao {
     @Query("UPDATE interaction_events SET processed = 1 WHERE id IN (:ids)")
     suspend fun markProcessed(ids: List<String>)
 
+    @Query("UPDATE interaction_events SET processed = 0")
+    suspend fun markAllUnprocessed()
+
     @Query("DELETE FROM interaction_events WHERE occurredAt < :before")
     suspend fun deleteOlderThan(before: Long): Int
 
@@ -41,8 +44,8 @@ interface MemoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(memory: MemoryEntity)
 
-    @Query("SELECT * FROM memories ORDER BY startedAt DESC")
-    fun observeAll(): Flow<List<MemoryEntity>>
+    @Query("SELECT * FROM memories WHERE source NOT LIKE 'rollup_%' ORDER BY startedAt DESC LIMIT :limit")
+    fun observeRecent(limit: Int = 200): Flow<List<MemoryEntity>>
 
     @Query("SELECT * FROM memories ORDER BY startedAt DESC LIMIT :limit")
     suspend fun latest(limit: Int = 250): List<MemoryEntity>
@@ -55,6 +58,12 @@ interface MemoryDao {
 
     @Query("DELETE FROM memories")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM memories WHERE source IN (:sources)")
+    suspend fun deleteBySources(sources: List<String>)
+
+    @Query("DELETE FROM memories WHERE source IN (:sources) AND startedAt >= :start AND startedAt < :end")
+    suspend fun deleteBySourcesBetween(sources: List<String>, start: Long, end: Long)
 
     @Query("UPDATE memories SET startedAt = startedAt + :bootEpochOffset, endedAt = endedAt + :bootEpochOffset WHERE startedAt < :legacyCutoff")
     suspend fun repairLegacyTimestamps(bootEpochOffset: Long, legacyCutoff: Long): Int

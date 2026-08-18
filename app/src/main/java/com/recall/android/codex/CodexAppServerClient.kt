@@ -6,20 +6,22 @@ import com.recall.android.R
 import com.recall.android.data.HistoryMemory
 import com.recall.android.data.HistoryEvidenceFormatter
 import java.io.Closeable
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -52,7 +54,9 @@ class CodexAppServerClient(
     private val nextId = AtomicLong(1)
     private val pending = ConcurrentHashMap<Long, CompletableDeferred<JsonObject>>()
     private val notificationFlow = MutableSharedFlow<JsonObject>(extraBufferCapacity = 256)
-    private val _state = MutableStateFlow(CodexRuntimeState())
+    private val _state = MutableStateFlow(
+        CodexRuntimeState(hasStoredLogin = File(context.filesDir, "codex-home/auth.json").isFile),
+    )
     val state: StateFlow<CodexRuntimeState> = _state.asStateFlow()
     val notifications = notificationFlow.asSharedFlow()
 
@@ -60,7 +64,7 @@ class CodexAppServerClient(
 
     suspend fun connect() {
         disconnect()
-        _state.value = CodexRuntimeState(CodexRuntimeStatus.Connecting)
+        _state.value = _state.value.copy(status = CodexRuntimeStatus.Connecting)
         val opened = CompletableDeferred<Unit>()
         val request = Request.Builder().url(endpoint).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
@@ -75,13 +79,13 @@ class CodexAppServerClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (!opened.isCompleted) opened.completeExceptionally(t)
                 failPending(t)
-                _state.value = CodexRuntimeState(CodexRuntimeStatus.Error, message = t.message)
+                _state.value = _state.value.copy(status = CodexRuntimeStatus.Error, message = t.message)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 failPending(IllegalStateException("Codex App Server disconnected: $reason"))
                 if (_state.value.status != CodexRuntimeStatus.Stopped) {
-                    _state.value = CodexRuntimeState(CodexRuntimeStatus.Stopped)
+                    _state.value = _state.value.copy(status = CodexRuntimeStatus.Stopped)
                 }
             }
         })
@@ -147,6 +151,7 @@ class CodexAppServerClient(
         _state.value = CodexRuntimeState(
             status = CodexRuntimeStatus.LoginRequired,
             message = context.getString(R.string.runtime_disconnected),
+            hasStoredLogin = false,
         )
     }
 
@@ -191,7 +196,12 @@ class CodexAppServerClient(
         return login
     }
 
-    suspend fun askHistory(question: String, memories: List<HistoryMemory>, workspace: String): String {
+    suspend fun askHistory(
+        question: String,
+        memories: List<HistoryMemory>,
+        workspace: String,
+        reasoningEffort: String? = null,
+    ): String {
         check(_state.value.isReady) { context.getString(R.string.runtime_login_first) }
         val threadResponse = request(
             "thread/start",
@@ -208,42 +218,43 @@ class CodexAppServerClient(
             ?.string("id")
             ?: error("Codex did not create a thread")
 
-        val prompt = buildHistoryPrompt(question, memories)
-        val turnResponse = request(
-            "turn/start",
-            buildJsonObject {
-                put("threadId", threadId)
-                put("input", buildJsonArray {
-                    add(buildJsonObject {
-                        put("type", "text")
-                        put("text", prompt)
-                    })
-                })
-                _state.value.model?.let { put("model", it) }
-                _state.value.reasoningEffort?.let { put("effort", it) }
-            },
-        )
-        val turnId = turnResponse["result"]?.jsonObject
-            ?.get("turn")?.jsonObject
-            ?.string("id")
-            ?: error("Codex did not start a turn")
-
-        val fragments = mutableListOf<String>()
-        withTimeout(180_000) {
-            notifications
-                .filter { it.paramsString("turnId") == turnId || it.method() == "turn/completed" }
-                .first { event ->
-                    when (event.method()) {
-                        "item/agentMessage/delta" -> event.findFirstString("delta")?.let(fragments::add)
-                        "item/completed" -> event.findAgentMessage()?.let {
-                            if (fragments.isEmpty()) fragments += it
-                        }
-                    }
-                    event.method() == "turn/completed" &&
-                        (event.paramsString("turnId") == null || event.paramsString("turnId") == turnId)
+        return coroutineScope {
+            // Subscribe before turn/start: fast responses can emit their first
+            // deltas before the JSON-RPC response to turn/start is delivered.
+            val events = Channel<JsonObject>(Channel.UNLIMITED)
+            val subscription = launch(start = CoroutineStart.UNDISPATCHED) {
+                notifications.collect(events::send)
+            }
+            try {
+                val prompt = buildHistoryPrompt(question, memories)
+                val turnResponse = request(
+                    "turn/start",
+                    buildJsonObject {
+                        put("threadId", threadId)
+                        put("input", buildJsonArray {
+                            add(buildJsonObject {
+                                put("type", "text")
+                                put("text", prompt)
+                            })
+                        })
+                        _state.value.model?.let { put("model", it) }
+                        (reasoningEffort ?: _state.value.reasoningEffort)?.let { put("effort", it) }
+                    },
+                )
+                val turnId = turnResponse["result"]?.jsonObject
+                    ?.get("turn")?.jsonObject
+                    ?.string("id")
+                    ?: error("Codex did not start a turn")
+                val accumulator = CodexTurnAccumulator(turnId)
+                withTimeout(180_000) {
+                    while (!accumulator.accept(events.receive())) Unit
                 }
+                accumulator.answer().ifBlank { error(context.getString(R.string.runtime_empty_answer)) }
+            } finally {
+                subscription.cancel()
+                events.close()
+            }
         }
-        return fragments.joinToString("").trim().ifBlank { context.getString(R.string.runtime_empty_answer) }
     }
 
     fun disconnect() {
@@ -310,11 +321,13 @@ class CodexAppServerClient(
                 model = _state.value.model,
                 modelDisplayName = _state.value.modelDisplayName,
                 reasoningEffort = _state.value.reasoningEffort,
+                hasStoredLogin = true,
             )
         } else {
             _state.value = CodexRuntimeState(
                 status = CodexRuntimeStatus.LoginRequired,
                 message = context.getString(R.string.runtime_login_required),
+                hasStoredLogin = false,
             )
         }
     }
@@ -342,24 +355,5 @@ class CodexAppServerClient(
 
 private fun JsonObject.method(): String? = string("method")
 
-private fun JsonObject.paramsString(key: String): String? =
-    (this["params"] as? JsonObject)?.string(key)
-
 private fun JsonObject.string(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull
-
-private fun JsonElement.findFirstString(key: String): String? = when (this) {
-    is JsonObject -> (this[key] as? JsonPrimitive)?.contentOrNull
-        ?: values.firstNotNullOfOrNull { it.findFirstString(key) }
-    is JsonArray -> firstNotNullOfOrNull { it.findFirstString(key) }
-    else -> null
-}
-
-private fun JsonElement.findAgentMessage(): String? = when (this) {
-    is JsonObject -> {
-        val type = (this["type"] as? JsonPrimitive)?.contentOrNull
-        if (type == "agentMessage") findFirstString("text") else values.firstNotNullOfOrNull { it.findAgentMessage() }
-    }
-    is JsonArray -> firstNotNullOfOrNull { it.findAgentMessage() }
-    else -> null
-}

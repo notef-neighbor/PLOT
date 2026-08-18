@@ -24,7 +24,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class InstalledApplication(
     val packageName: String,
@@ -102,13 +104,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadApplications()
         refreshCapabilities()
-        if (java.io.File(application.filesDir, "codex-home/auth.json").isFile) {
-            CodexRuntimeService.start(application)
-        }
     }
 
     fun acceptDisclosure() = viewModelScope.launch {
-        val installed = apps.value.ifEmpty { discoverApplications() }
+        val installed = apps.value.ifEmpty { withContext(Dispatchers.Default) { discoverApplications() } }
         container.settings.setAllowedPackages(installed.filterNot { it.isProtected }.map { it.packageName }.toSet())
         container.settings.acceptDisclosure()
     }
@@ -164,7 +163,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val modelQuestion = HistoryConversationPrompt.build(previousConversation, question)
                 val answer = when {
-                    container.codexRuntime.state.value.isReady -> {
+                    container.codexRuntime.state.value.isReady ||
+                        container.codexRuntime.state.value.hasStoredLogin -> {
                         CodexRuntimeService.start(getApplication())
                         container.codexRuntime.askHistory(modelQuestion, matches)
                     }
@@ -301,7 +301,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadApplications() {
         viewModelScope.launch {
-            apps.value = discoverApplications()
+            apps.value = withContext(Dispatchers.Default) { discoverApplications() }
         }
     }
 

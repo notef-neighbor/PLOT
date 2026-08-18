@@ -40,6 +40,8 @@
     <string name="capture_allowed_count">Capturing only the %1$d apps you allowed</string>
     <string name="timeline_empty_title">No history yet</string>
     <string name="timeline_empty_body">Allow apps in Settings and their activity will appear on your timeline.</string>
+    <string name="timeline_processing_title">Organizing your history</string>
+    <string name="timeline_processing_body">Your activity is saved. PLOT is turning it into readable history cards.</string>
     <string name="daily_report">Daily report</string>
     <string name="delete">Delete</string>
     <string name="on_device">On device</string>
@@ -194,6 +196,10 @@
     <string name="summary_title">%1$s · %2$s</string>
     <string name="summary_body">Recorded %1$d interactions in %2$s.</string>
     <string name="summary_main_content"> Main content: %1$s</string>
+    <string name="rollup_title">%1$s–%2$s activity</string>
+    <string name="rollup_summary">%1$d short activity summaries, covering %2$d interactions.</string>
+    <string name="rollup_apps">Apps: %1$s</string>
+    <string name="rollup_activity">%1$s · %2$s</string>
     <string name="report_title">%1$s daily report</string>
     <string name="report_keyword">daily report</string>
     <string name="report_empty">No activity history was recorded for this day.</string>

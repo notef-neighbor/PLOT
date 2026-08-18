@@ -20,6 +20,7 @@ data class CodexRuntimeState(
     val model: String? = null,
     val modelDisplayName: String? = null,
     val reasoningEffort: String? = null,
+    val hasStoredLogin: Boolean = false,
 ) {
     val isReady: Boolean get() = status == CodexRuntimeStatus.Authenticated
 }

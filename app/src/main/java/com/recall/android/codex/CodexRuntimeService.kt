@@ -40,7 +40,7 @@ class CodexRuntimeService : Service() {
                 .onSuccess { updateNotification(getString(R.string.codex_notification_running)) }
                 .onFailure { updateNotification(it.message ?: getString(R.string.codex_notification_failed)) }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
