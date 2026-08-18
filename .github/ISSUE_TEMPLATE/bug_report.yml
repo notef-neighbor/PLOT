@@ -1,0 +1,33 @@
+name: Bug report
+description: Report reproducible PLOT behavior using synthetic data
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach personal history, database files, authentication URLs, or secrets.
+  - type: input
+    id: version
+    attributes:
+      label: PLOT version
+      placeholder: "0.1"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Android device and version
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include expected behavior and synthetic reproduction steps.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell

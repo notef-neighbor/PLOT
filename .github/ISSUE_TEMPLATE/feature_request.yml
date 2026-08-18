@@ -1,0 +1,19 @@
+name: Feature request
+description: Propose an improvement to PLOT
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should PLOT solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed experience
+      description: Describe the behavior, privacy boundaries, and Android limitations.
+    validations:
+      required: true

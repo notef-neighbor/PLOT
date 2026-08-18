@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+build/
+**/build/
+**/node_modules/
+gateway/dist/
+captures/
+.DS_Store
+*.jks
+*.keystore
+keystore.properties
+.tools/
+app/src/main/jniLibs/**/libcodex_android.so
