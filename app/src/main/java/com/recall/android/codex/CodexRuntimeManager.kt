@@ -1,0 +1,141 @@
+package com.recall.android.codex
+
+import android.content.Context
+import com.recall.android.R
+import com.recall.android.data.HistoryMemory
+import java.io.File
+import java.io.FileOutputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+class CodexRuntimeManager(private val context: Context) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val client = CodexAppServerClient(context)
+    private val _state = MutableStateFlow(CodexRuntimeState())
+    val state: StateFlow<CodexRuntimeState> = _state.asStateFlow()
+
+    @Volatile private var process: Process? = null
+    private val startMutex = Mutex()
+
+    init {
+        scope.launch { client.state.collectLatest { _state.value = it } }
+        if (!binaryFile().exists()) {
+            _state.value = CodexRuntimeState(
+                CodexRuntimeStatus.Unavailable,
+                message = context.getString(R.string.runtime_not_bundled),
+            )
+        }
+    }
+
+    suspend fun start() = withContext(Dispatchers.IO) {
+        startMutex.withLock {
+            if (client.state.value.status == CodexRuntimeStatus.Authenticated ||
+                client.state.value.status == CodexRuntimeStatus.LoginRequired
+            ) return@withLock
+            val binary = binaryFile()
+            check(binary.exists()) { context.getString(R.string.runtime_binary_missing) }
+            _state.value = CodexRuntimeState(CodexRuntimeStatus.Starting, message = context.getString(R.string.runtime_starting))
+            if (process?.isAlive != true) {
+                val codexHome = File(context.filesDir, "codex-home").apply { mkdirs() }
+                val workspace = File(context.filesDir, "codex-workspace").apply { mkdirs() }
+                val temp = File(context.cacheDir, "codex-temp").apply { mkdirs() }
+                val caBundle = createAndroidCaBundle(codexHome)
+                process = ProcessBuilder(
+                    binary.absolutePath,
+                    "--listen",
+                    "ws://127.0.0.1:4500",
+                ).apply {
+                    directory(workspace)
+                    redirectErrorStream(true)
+                    environment()["CODEX_HOME"] = codexHome.absolutePath
+                    environment()["TMPDIR"] = temp.absolutePath
+                    environment()["SSL_CERT_FILE"] = caBundle.absolutePath
+                    environment()["RUST_BACKTRACE"] = "1"
+                }.start()
+                scope.launch {
+                    process?.inputStream?.bufferedReader()?.useLines { lines ->
+                        lines.forEach { android.util.Log.i("RecallCodex", it.take(4_000)) }
+                    }
+                }
+            }
+            var lastError: Throwable? = null
+            repeat(40) {
+                if (process?.isAlive != true) error("Codex App Server exited during startup")
+                runCatching { client.connect() }
+                    .onSuccess { return@withLock }
+                    .onFailure { lastError = it }
+                delay(250)
+            }
+            throw lastError ?: IllegalStateException("Codex App Server did not start")
+        }
+    }
+
+    suspend fun beginDeviceLogin(): CodexDeviceLogin {
+        start()
+        return client.beginDeviceLogin()
+    }
+
+    suspend fun beginBrowserLogin(): CodexBrowserLogin {
+        start()
+        return client.beginBrowserLogin()
+    }
+
+    suspend fun refreshAccount() {
+        start()
+        client.refreshAccount()
+    }
+
+    suspend fun logout() {
+        start()
+        client.logout()
+    }
+
+    suspend fun askHistory(question: String, memories: List<HistoryMemory>): String {
+        start()
+        return client.askHistory(
+            question = question,
+            memories = memories,
+            workspace = File(context.filesDir, "codex-workspace").apply { mkdirs() }.absolutePath,
+        )
+    }
+
+    fun stop() {
+        client.disconnect()
+        process?.destroy()
+        process = null
+        _state.value = CodexRuntimeState(CodexRuntimeStatus.Stopped)
+    }
+
+    private fun binaryFile(): File = File(context.applicationInfo.nativeLibraryDir, "libcodex_android.so")
+
+    private fun createAndroidCaBundle(codexHome: File): File {
+        val certificateDirectory = listOf(
+            File("/apex/com.android.conscrypt/cacerts"),
+            File("/system/etc/security/cacerts"),
+        ).firstOrNull { directory -> directory.listFiles()?.isNotEmpty() == true }
+            ?: error(context.getString(R.string.runtime_certificates_failed))
+        val bundle = File(codexHome, "android-ca-bundle.pem")
+        FileOutputStream(bundle, false).buffered().use { output ->
+            certificateDirectory.listFiles()
+                .orEmpty()
+                .filter(File::isFile)
+                .sortedBy(File::getName)
+                .forEach { certificate ->
+                    certificate.inputStream().buffered().use { it.copyTo(output) }
+                    output.write('\n'.code)
+                }
+        }
+        check(bundle.length() > 0) { context.getString(R.string.runtime_certificates_empty) }
+        return bundle
+    }
+}
