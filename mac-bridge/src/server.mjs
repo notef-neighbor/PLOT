@@ -1,7 +1,6 @@
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { ensureCredentials } from "./credentials.mjs";
 import { readHistoryPage } from "./history.mjs";
 
@@ -60,8 +59,7 @@ function localAddresses() {
 }
 
 function computerName() {
-  const result = spawnSync("/usr/sbin/scutil", ["--get", "ComputerName"], { encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : os.hostname();
+  return os.hostname().replace(/\.local$/i, "").replaceAll("-", " ");
 }
 
 function json(response, status, value) {
