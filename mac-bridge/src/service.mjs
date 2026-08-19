@@ -1,20 +1,23 @@
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, unlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, unlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const label = "com.plot.mac-history-bridge";
 const uid = process.getuid();
 const stateDirectory = path.join(os.homedir(), ".plot-history-bridge");
+const runtimeDirectory = path.join(stateDirectory, "runtime");
 const agentDirectory = path.join(os.homedir(), "Library/LaunchAgents");
 const plistPath = path.join(agentDirectory, `${label}.plist`);
-const serverPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "server.mjs");
+const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
+const serverPath = path.join(runtimeDirectory, "server.mjs");
 const action = process.argv[2];
 
 if (action === "install") {
   await mkdir(agentDirectory, { recursive: true });
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await cp(sourceDirectory, runtimeDirectory, { recursive: true, force: true });
   await writeFile(plistPath, plist(), { mode: 0o600 });
   await chmod(plistPath, 0o600);
   runLaunchctl(["bootout", `gui/${uid}/${label}`], true);

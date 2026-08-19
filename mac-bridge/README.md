@@ -12,4 +12,8 @@ Paste the printed `PLOT-MAC-1:...` pairing code into PLOT under **Settings → M
 
 The bridge listens on the local network by default. Keep macOS Firewall enabled and pair only devices you control. Set `PLOT_MAC_BRIDGE_HOST=127.0.0.1` to make it local-only.
 
-The launch agent keeps the bridge available in the background after Mac sign-in. To stop automatic startup, run `npm run uninstall-service`. Already imported Android history is not deleted.
+The installer copies the small bridge runtime to `~/.plot-history-bridge/runtime`
+so macOS can start it in the background even when the repository is stored in a
+privacy-protected folder such as Documents. The launch agent keeps it available
+after Mac sign-in. To stop automatic startup, run `npm run uninstall-service`.
+Already imported Android history is not deleted.
