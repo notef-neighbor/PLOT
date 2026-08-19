@@ -44,11 +44,11 @@ interface MemoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(memory: MemoryEntity)
 
-    @Query("SELECT * FROM memories WHERE source NOT LIKE 'rollup_%' ORDER BY startedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM memories WHERE source NOT LIKE 'rollup_%' AND source != 'mac_10min' ORDER BY startedAt DESC LIMIT :limit")
     fun observeRecent(limit: Int = 200): Flow<List<MemoryEntity>>
 
     @Query("SELECT * FROM memories ORDER BY startedAt DESC LIMIT :limit")
-    suspend fun latest(limit: Int = 250): List<MemoryEntity>
+    suspend fun latest(limit: Int = 2_000): List<MemoryEntity>
 
     @Query("SELECT * FROM memories WHERE startedAt >= :start AND startedAt < :end ORDER BY startedAt ASC")
     suspend fun between(start: Long, end: Long): List<MemoryEntity>

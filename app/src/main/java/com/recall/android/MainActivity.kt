@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DesktopMac
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
@@ -469,6 +470,7 @@ private fun ProcessingTimeline() {
 @Composable
 private fun MemoryCard(memory: HistoryMemory, onDelete: (String) -> Unit) {
     val isDailyReport = memory.source.startsWith("daily_")
+    val isMacHistory = memory.source.startsWith("mac_")
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (isDailyReport) Color(0xFFF2EBCB) else MaterialTheme.colorScheme.surface,
@@ -501,7 +503,8 @@ private fun MemoryCard(memory: HistoryMemory, onDelete: (String) -> Unit) {
             Spacer(Modifier.height(12.dp))
             Text(
                 "${memory.applications.joinToString(" · ")}  •  ${memory.eventCount} events" +
-                    if (isDailyReport) "  •  ${if (memory.source == "daily_codex") "Codex" else stringResource(R.string.on_device)}" else "",
+                    if (isDailyReport) "  •  ${if (memory.source == "daily_codex") "Codex" else stringResource(R.string.on_device)}"
+                    else if (isMacHistory) "  •  ${stringResource(R.string.mac_history_source)}" else "",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 maxLines = 1,
@@ -647,8 +650,12 @@ private fun PrivacyScreen(state: MainUiState, viewModel: MainViewModel, padding:
     val openAuthentication: (String) -> Unit = { url -> openChatGptAuthentication(context, url) }
     var gatewayUrl by rememberSaveable { mutableStateOf(state.settings.gatewayUrl) }
     var gatewayToken by rememberSaveable { mutableStateOf("") }
+    var macPairingCode by rememberSaveable { mutableStateOf("") }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showDisconnectDialog by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.settings.macHistoryEnabled) {
+        if (state.settings.macHistoryEnabled) macPairingCode = ""
+    }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {}
@@ -747,6 +754,65 @@ private fun PrivacyScreen(state: MainUiState, viewModel: MainViewModel, padding:
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
                 )
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.mac_history_title)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DesktopMac, null, tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text(
+                            if (state.settings.macHistoryEnabled) state.settings.macHistoryDeviceName
+                            else stringResource(R.string.mac_history_not_connected),
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(stringResource(R.string.mac_history_detail), fontSize = 12.sp)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (state.settings.macHistoryEnabled) {
+                    val syncLabel = if (state.settings.macHistoryLastSyncAt > 0) {
+                        stringResource(R.string.mac_history_last_sync, formatTime(state.settings.macHistoryLastSyncAt))
+                    } else {
+                        stringResource(R.string.mac_history_waiting_sync)
+                    }
+                    Text(syncLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    if (state.settings.macHistoryLastError.isNotBlank()) {
+                        Text(
+                            state.settings.macHistoryLastError,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = viewModel::syncMacHistoryNow, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.mac_history_sync_now))
+                    }
+                    TextButton(
+                        onClick = viewModel::disconnectMacHistory,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text(stringResource(R.string.mac_history_disconnect)) }
+                } else {
+                    Text(stringResource(R.string.mac_history_pairing_help), fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = macPairingCode,
+                        onValueChange = { macPairingCode = it },
+                        label = { Text(stringResource(R.string.mac_history_pairing_code)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.pairMacHistory(macPairingCode)
+                        },
+                        enabled = macPairingCode.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.mac_history_connect)) }
+                }
             }
         }
         item {

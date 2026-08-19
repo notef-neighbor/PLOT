@@ -27,6 +27,15 @@ data class ObservationState(
     val dailyReportMinute: Int = 0,
     val notfBotEnabled: Boolean = true,
     val notfBotAutoSendEnabled: Boolean = false,
+    val macHistoryEnabled: Boolean = false,
+    val macHistoryUrl: String = "",
+    val macHistoryToken: String = "",
+    val macHistoryTlsPin: String = "",
+    val macHistoryDeviceId: String = "",
+    val macHistoryDeviceName: String = "",
+    val macHistoryCursor: String = "",
+    val macHistoryLastSyncAt: Long = 0L,
+    val macHistoryLastError: String = "",
 )
 
 class ObservationSettings(
@@ -48,6 +57,17 @@ class ObservationSettings(
             dailyReportMinute = preferences[DAILY_REPORT_MINUTE] ?: 0,
             notfBotEnabled = preferences[NOTF_BOT_ENABLED] ?: true,
             notfBotAutoSendEnabled = preferences[NOTF_BOT_AUTO_SEND_ENABLED] ?: false,
+            macHistoryEnabled = preferences[MAC_HISTORY_ENABLED] ?: false,
+            macHistoryUrl = preferences[MAC_HISTORY_URL].orEmpty(),
+            macHistoryToken = preferences[MAC_HISTORY_TOKEN]
+                ?.let { runCatching { cipher.decrypt(it) }.getOrNull() }
+                .orEmpty(),
+            macHistoryTlsPin = preferences[MAC_HISTORY_TLS_PIN].orEmpty(),
+            macHistoryDeviceId = preferences[MAC_HISTORY_DEVICE_ID].orEmpty(),
+            macHistoryDeviceName = preferences[MAC_HISTORY_DEVICE_NAME].orEmpty(),
+            macHistoryCursor = preferences[MAC_HISTORY_CURSOR].orEmpty(),
+            macHistoryLastSyncAt = preferences[MAC_HISTORY_LAST_SYNC_AT]?.toLongOrNull() ?: 0L,
+            macHistoryLastError = preferences[MAC_HISTORY_LAST_ERROR].orEmpty(),
         )
     }.stateIn(scope, SharingStarted.Eagerly, ObservationState())
 
@@ -91,6 +111,38 @@ class ObservationSettings(
         it[NOTF_BOT_AUTO_SEND_ENABLED] = enabled
     }
 
+    suspend fun setMacHistoryPairing(pairing: MacHistoryPairing) = context.recallDataStore.edit {
+        it[MAC_HISTORY_ENABLED] = true
+        it[MAC_HISTORY_URL] = pairing.url
+        it[MAC_HISTORY_TOKEN] = cipher.encrypt(pairing.token)
+        it[MAC_HISTORY_TLS_PIN] = pairing.tlsPin
+        it[MAC_HISTORY_DEVICE_ID] = pairing.deviceId
+        it[MAC_HISTORY_DEVICE_NAME] = pairing.deviceName
+        it[MAC_HISTORY_CURSOR] = ""
+        it[MAC_HISTORY_LAST_SYNC_AT] = "0"
+        it.remove(MAC_HISTORY_LAST_ERROR)
+    }
+
+    suspend fun setMacHistorySyncState(cursor: String, lastSyncAt: Long, error: String?) =
+        context.recallDataStore.edit {
+            it[MAC_HISTORY_CURSOR] = cursor
+            it[MAC_HISTORY_LAST_SYNC_AT] = lastSyncAt.toString()
+            if (error.isNullOrBlank()) it.remove(MAC_HISTORY_LAST_ERROR)
+            else it[MAC_HISTORY_LAST_ERROR] = error.take(240)
+        }
+
+    suspend fun clearMacHistory() = context.recallDataStore.edit {
+        it.remove(MAC_HISTORY_ENABLED)
+        it.remove(MAC_HISTORY_URL)
+        it.remove(MAC_HISTORY_TOKEN)
+        it.remove(MAC_HISTORY_TLS_PIN)
+        it.remove(MAC_HISTORY_DEVICE_ID)
+        it.remove(MAC_HISTORY_DEVICE_NAME)
+        it.remove(MAC_HISTORY_CURSOR)
+        it.remove(MAC_HISTORY_LAST_SYNC_AT)
+        it.remove(MAC_HISTORY_LAST_ERROR)
+    }
+
     companion object {
         private val DISCLOSURE = booleanPreferencesKey("disclosure_accepted")
         private val PAUSED = booleanPreferencesKey("collection_paused")
@@ -102,5 +154,14 @@ class ObservationSettings(
         private val DAILY_REPORT_MINUTE = intPreferencesKey("daily_report_minute")
         private val NOTF_BOT_ENABLED = booleanPreferencesKey("notf_bot_enabled")
         private val NOTF_BOT_AUTO_SEND_ENABLED = booleanPreferencesKey("notf_bot_auto_send_enabled")
+        private val MAC_HISTORY_ENABLED = booleanPreferencesKey("mac_history_enabled")
+        private val MAC_HISTORY_URL = stringPreferencesKey("mac_history_url")
+        private val MAC_HISTORY_TOKEN = stringPreferencesKey("mac_history_token")
+        private val MAC_HISTORY_TLS_PIN = stringPreferencesKey("mac_history_tls_pin")
+        private val MAC_HISTORY_DEVICE_ID = stringPreferencesKey("mac_history_device_id")
+        private val MAC_HISTORY_DEVICE_NAME = stringPreferencesKey("mac_history_device_name")
+        private val MAC_HISTORY_CURSOR = stringPreferencesKey("mac_history_cursor")
+        private val MAC_HISTORY_LAST_SYNC_AT = stringPreferencesKey("mac_history_last_sync_at")
+        private val MAC_HISTORY_LAST_ERROR = stringPreferencesKey("mac_history_last_error")
     }
 }

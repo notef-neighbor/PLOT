@@ -29,7 +29,7 @@ class SixHourRollupTest {
     }
 
     @Test
-    fun `does not recursively include reports or earlier rollups`() {
+    fun `does not recursively include reports rollups or imported Mac summaries`() {
         val buckets = SixHourRollup.buckets(
             date = date,
             zone = zone,
@@ -37,6 +37,7 @@ class SixHourRollupTest {
                 memory("base", "2026-08-18T01:00:00Z"),
                 memory("daily", "2026-08-18T02:00:00Z", "daily_codex"),
                 memory("rollup", "2026-08-18T03:00:00Z", SixHourRollup.SOURCE),
+                memory("mac", "2026-08-18T04:00:00Z", "mac_6h"),
             ),
         )
 

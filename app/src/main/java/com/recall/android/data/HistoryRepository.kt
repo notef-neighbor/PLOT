@@ -139,6 +139,14 @@ class HistoryRepository(
         )
     }
 
+    suspend fun saveMemories(memories: List<HistoryMemory>) {
+        if (memories.isEmpty()) return
+        val entities = withContext(Dispatchers.Default) { memories.map { it.toEntity() } }
+        database.withTransaction {
+            entities.forEach { database.memoryDao().insert(it) }
+        }
+    }
+
     suspend fun replaceDerivedMemories(
         sources: List<String>,
         start: Long,

@@ -1,6 +1,6 @@
 # PLOT privacy policy
 
-Last updated: August 18, 2026
+Last updated: August 19, 2026
 
 PLOT is a local-first Android history application. It records data only after
 the person using the device accepts the in-app disclosure and enables the
@@ -24,6 +24,11 @@ AES-GCM key. Raw interaction events are deleted after 48 hours. Generated
 memories remain on the device until the user deletes an item or clears all
 history. Uninstalling PLOT deletes its local data and encryption key.
 
+If the optional Mac Computer History bridge is paired, PLOT imports generated
+10-minute and 6-hour summaries into the same encrypted Android database. Raw Mac
+events and local citation paths stay on the Mac. Disconnecting the Mac stops new
+imports; already imported summaries remain until deleted with other history.
+
 ## AI processing
 
 PLOT does not include a provider API key. When a user connects ChatGPT through
@@ -38,11 +43,17 @@ The optional ChatGPT/Codex and gateway features communicate with their
 respective providers. PLOT itself has no developer-operated analytics,
 advertising, crash-reporting, or history collection service.
 
+The optional Mac bridge communicates directly between devices reachable on the
+same local network. The connection uses HTTPS pinned to the certificate in the
+pairing code and requires a random bearer token. It does not use a PLOT-operated
+relay or cloud sync service.
+
 ## Control
 
 Users can pause collection, enable or disable all eligible apps at once, change
 apps individually, disconnect ChatGPT, disable daily reports, delete individual
 memories, or delete all local history.
+Users can also disconnect a paired Mac at any time.
 
 Security issues should be reported using the private process in
 [SECURITY.md](SECURITY.md), not a public issue containing personal history.

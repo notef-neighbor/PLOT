@@ -16,8 +16,10 @@ import com.recall.android.data.HistoryMemory
 import com.recall.android.data.HistoryEvidenceFormatter
 import com.recall.android.data.ObservationState
 import com.recall.android.data.RecentActivity
+import com.recall.android.data.MacHistoryPairing
 import com.recall.android.worker.DailyReportScheduler
 import com.recall.android.worker.CalendarSyncScheduler
+import com.recall.android.worker.MacHistorySyncWorker
 import com.recall.android.capture.RecallNotificationListenerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -208,6 +210,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         container.settings.setGateway(url, effectiveToken)
         interaction.value = interaction.value.copy(message = text(R.string.message_gateway_saved))
+    }
+
+    fun pairMacHistory(code: String) = viewModelScope.launch {
+        interaction.value = interaction.value.copy(message = text(R.string.message_mac_connecting))
+        runCatching {
+            val pairing = MacHistoryPairing.parse(code)
+            val temporary = container.settings.state.value.copy(
+                macHistoryEnabled = true,
+                macHistoryUrl = pairing.url,
+                macHistoryToken = pairing.token,
+                macHistoryTlsPin = pairing.tlsPin,
+                macHistoryDeviceId = pairing.deviceId,
+                macHistoryDeviceName = pairing.deviceName,
+            )
+            val firstPage = withContext(Dispatchers.IO) { container.macHistoryClient.fetch(temporary, "") }
+            container.settings.setMacHistoryPairing(pairing)
+            container.historyRepository.saveMemories(firstPage.memories)
+            container.settings.setMacHistorySyncState(firstPage.nextCursor, System.currentTimeMillis(), null)
+            MacHistorySyncWorker.enqueueNow(getApplication())
+            pairing.deviceName
+        }.onSuccess { deviceName ->
+            interaction.value = interaction.value.copy(message = text(R.string.message_mac_connected, deviceName))
+        }.onFailure { error ->
+            interaction.value = interaction.value.copy(message = error.message ?: text(R.string.message_mac_connect_failed))
+        }
+    }
+
+    fun syncMacHistoryNow() {
+        MacHistorySyncWorker.enqueueNow(getApplication())
+        interaction.value = interaction.value.copy(message = text(R.string.message_mac_syncing))
+    }
+
+    fun disconnectMacHistory() = viewModelScope.launch {
+        container.settings.clearMacHistory()
+        interaction.value = interaction.value.copy(message = text(R.string.message_mac_disconnected))
     }
 
     fun startCodex() {

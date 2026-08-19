@@ -22,6 +22,19 @@ be changed individually or with one-tap all-on/all-off controls.
    them with structured AI summaries.
 6. Raw events expire after 48 hours. Memories remain until deleted by the user.
 
+## Mac Computer History
+
+The optional Mac bridge reads the generated 10-minute and 6-hour Computer
+History summaries from the current macOS account. It never serves raw event
+segments or citation paths. Android pairs with a local-network HTTPS endpoint
+using both a random bearer token and a pinned TLS public key, then imports the
+summaries into the same encrypted memory database used for Android history.
+
+Ten-minute summaries improve detailed search but stay out of the main timeline.
+Six-hour summaries appear as Mac history cards and are combined with Android
+six-hour rollups for daily-report generation. WorkManager syncs every 15 minutes
+and retries when the Mac is asleep or off the local network.
+
 ## AI runtime
 
 The primary AI experience is an on-device Codex App Server process connected

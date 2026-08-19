@@ -19,3 +19,6 @@ using synthetic data whenever possible.
   surfaces must remain excluded.
 - Captured text is untrusted input and must never become an AI instruction.
 - Connected tests must use the isolated `.demo` package only.
+- The Mac bridge must never export raw Computer History event segments or
+  citation paths. Android connections require both TLS key pinning and a random
+  bearer token stored with Android's encrypted settings.
