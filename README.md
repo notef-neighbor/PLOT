@@ -8,7 +8,8 @@ PLOT is an independent, open-source Android app that records the activity
 Android exposes, encrypts it locally, and turns it into searchable history and
 automatic daily reports. It runs Codex App Server directly on the phone, so the
 AI connection uses the user's ChatGPT sign-in instead of an API key embedded in
-the APK.
+the APK. An optional Mac bridge combines generated Mac Computer History
+summaries with the Android timeline, search, and daily report.
 
 As a bonus, type `@ChapiChapi` or `@ちゃぴちゃぴ` in an editable field inside
 an allowed app to open a private AI conversation without adding a bot to the
@@ -72,6 +73,8 @@ flowchart LR
     A[Allowed Android apps] --> B[Accessibility events]
     A --> C[Notifications]
     D[Google Calendar] --> E[Calendar sync]
+    M[Mac Computer History summaries] --> N[Authenticated local bridge]
+    N --> F
     B --> F[Encrypted local vault]
     C --> F
     E --> F
@@ -98,6 +101,8 @@ flowchart LR
 - PLOT does not bypass Android security or retrieve unseen message archives.
 - Personal history is sent to an AI connection only when required for the
   requested search, report, or ChapiChapi conversation.
+- Mac integration transfers generated 10-minute and 6-hour summaries over
+  certificate-pinned HTTPS. Raw Mac events never leave the Mac.
 
 See [the product and privacy specification](docs/product.md) for the detailed
 capture model and known platform limits.
@@ -114,6 +119,11 @@ The public [privacy policy](PRIVACY.md), [security policy](SECURITY.md), and
 4. Enable its Accessibility service. Notification and Calendar access are
    optional and configured separately.
 5. Open **Settings**, choose **Connect ChatGPT**, and finish sign-in.
+
+To combine Mac history, run `npm run install-service` in `mac-bridge`, copy the
+pairing code from `~/.plot-history-bridge/bridge.log`, then paste it under
+**Settings → Mac Computer History**. Both devices must be reachable on the same
+local network; background sync runs every 15 minutes.
 
 The first release link becomes active after this repository is published and a
 version tag has produced a GitHub Release.

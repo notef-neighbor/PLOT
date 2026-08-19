@@ -1,0 +1,15 @@
+{
+  "name": "plot-mac-history-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "install-service": "node src/service.mjs install",
+    "uninstall-service": "node src/service.mjs uninstall",
+    "test": "node --test"
+  }
+}

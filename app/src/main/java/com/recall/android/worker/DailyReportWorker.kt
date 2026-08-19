@@ -36,19 +36,26 @@ class DailyReportWorker(
         val zone = ZoneId.systemDefault()
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        if (settings.macHistoryEnabled) {
+            runCatching { MacHistorySyncWorker.sync(container) }
+                .onFailure { Log.w(TAG, "Mac sync before daily report failed", it) }
+        }
         val memories = container.historyRepository.memoriesBetween(start, end)
             .filter { !it.source.startsWith("daily_") && !it.source.startsWith("rollup_") }
 
         return runCatching {
-            val local = buildLocalReport(date, memories)
-            val rollups = HistoryRollupWorker.buildDay(applicationContext, date, memories, zone)
+            val androidMemories = memories.filterNot { it.source.startsWith("mac_") }
+            val macSixHour = memories.filter { it.source == "mac_6h" }
+            val macTenMinute = memories.filter { it.source == "mac_10min" }
+            val local = buildLocalReport(date, androidMemories, macSixHour.ifEmpty { macTenMinute })
+            val rollups = HistoryRollupWorker.buildDay(applicationContext, date, androidMemories, zone)
             container.historyRepository.replaceDerivedMemories(
                 sources = SixHourRollup.DERIVED_SOURCES,
                 start = start,
                 end = end,
                 memories = rollups,
             )
-            val reportEvidence = rollups.ifEmpty { memories }
+            val reportEvidence = (rollups + macSixHour).ifEmpty { androidMemories + macTenMinute }
             val generatedText = if (memories.isNotEmpty() && hasCodexAuth()) {
                 runCatching {
                     container.codexRuntime.askHistory(
@@ -109,9 +116,14 @@ class DailyReportWorker(
     private fun hasCodexAuth(): Boolean =
         File(applicationContext.filesDir, "codex-home/auth.json").isFile
 
-    private fun buildLocalReport(date: LocalDate, memories: List<HistoryMemory>): String {
+    private fun buildLocalReport(
+        date: LocalDate,
+        androidMemories: List<HistoryMemory>,
+        macMemories: List<HistoryMemory>,
+    ): String {
+        val memories = androidMemories + macMemories
         if (memories.isEmpty()) return applicationContext.getString(R.string.report_empty)
-        val eventCount = memories.sumOf { it.eventCount }
+        val eventCount = androidMemories.sumOf { it.eventCount }
         val activeMinutes = memories.sumOf { ((it.endedAt - it.startedAt).coerceAtLeast(0) / 60_000) }
         val appCounts = memories
             .flatMap { memory -> memory.applications.map { it to max(memory.eventCount, 1) } }
@@ -119,7 +131,8 @@ class DailyReportWorker(
             .mapValues { (_, values) -> values.sum() }
             .entries.sortedByDescending { it.value }.take(5)
         return buildString {
-            appendLine(applicationContext.getString(R.string.report_local_summary, formatDate(date), memories.size, eventCount))
+            appendLine(applicationContext.getString(R.string.report_local_summary, formatDate(date), androidMemories.size, eventCount))
+            if (macMemories.isNotEmpty()) appendLine(applicationContext.getString(R.string.report_mac_summary, macMemories.size))
             if (activeMinutes > 0) appendLine(applicationContext.getString(R.string.report_active_minutes, activeMinutes))
             if (appCounts.isNotEmpty()) appendLine(applicationContext.getString(R.string.report_top_apps, appCounts.joinToString(", ") { it.key }))
             append(applicationContext.getString(R.string.report_main_activity, memories.take(5).joinToString(" / ") { it.title }))

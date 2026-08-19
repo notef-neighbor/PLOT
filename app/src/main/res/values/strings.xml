@@ -204,6 +204,7 @@
     <string name="report_keyword">daily report</string>
     <string name="report_empty">No activity history was recorded for this day.</string>
     <string name="report_local_summary">%1$s recorded %2$d activity sessions and %3$d interactions.</string>
+    <string name="report_mac_summary">Included %1$d Mac Computer History summaries.</string>
     <string name="report_active_minutes">Recorded active time was about %1$d minutes.</string>
     <string name="report_top_apps">Most used apps: %1$s</string>
     <string name="report_main_activity">Main activity: %1$s</string>
@@ -235,4 +236,20 @@
     <string name="demo_report_summary">You focused on Android development, product documentation, and release planning. Most activity happened in Chrome, Slack, and Calendar.</string>
     <string name="demo_question">What did I work on this morning?</string>
     <string name="demo_answer">You spent the morning planning the Android release. You reviewed your Calendar, checked project updates in Slack, researched background capture in Chrome, and drafted the open-source documentation.</string>
+    <string name="mac_history_title">Mac Computer History</string>
+    <string name="mac_history_source">Mac</string>
+    <string name="mac_history_not_connected">Not connected</string>
+    <string name="mac_history_detail">Search Mac and Android history together. Only generated Mac summaries are transferred; raw events stay on your Mac.</string>
+    <string name="mac_history_pairing_help">Run the PLOT bridge on your Mac, then paste its pairing code here.</string>
+    <string name="mac_history_pairing_code">Pairing code</string>
+    <string name="mac_history_connect">Connect Mac</string>
+    <string name="mac_history_last_sync">Last synced %1$s</string>
+    <string name="mac_history_waiting_sync">Waiting for first sync</string>
+    <string name="mac_history_sync_now">Sync now</string>
+    <string name="mac_history_disconnect">Disconnect Mac</string>
+    <string name="message_mac_connecting">Connecting to Mac…</string>
+    <string name="message_mac_connected">Connected to %1$s</string>
+    <string name="message_mac_connect_failed">Could not connect to Mac</string>
+    <string name="message_mac_syncing">Syncing Mac history</string>
+    <string name="message_mac_disconnected">Mac disconnected. Imported history remains searchable.</string>
 </resources>

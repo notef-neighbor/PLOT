@@ -95,7 +95,9 @@ internal object SixHourRollup {
     }
 
     private fun isBaseMemory(memory: HistoryMemory): Boolean =
-        !memory.source.startsWith("daily_") && !memory.source.startsWith("rollup_")
+        !memory.source.startsWith("daily_") &&
+            !memory.source.startsWith("rollup_") &&
+            !memory.source.startsWith("mac_")
 
     private const val HOURS_PER_BUCKET = 6
     private const val MAX_APPS = 8

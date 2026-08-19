@@ -24,6 +24,7 @@ class AppContainer(context: Context) {
     val privacyGuard = PrivacyGuard(applicationContext.packageName)
     val codexRuntime = CodexRuntimeManager(applicationContext)
     val gatewayClient = HistoryGatewayClient()
+    val macHistoryClient = MacHistoryClient()
     val historyRepository = HistoryRepository(
         context = applicationContext,
         database = database,

@@ -13,6 +13,7 @@ import com.recall.android.worker.HistoryRollupWorker
 import com.recall.android.worker.SummarizeWorker
 import com.recall.android.worker.DailyReportScheduler
 import com.recall.android.worker.CalendarSyncScheduler
+import com.recall.android.worker.MacHistorySyncWorker
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +76,16 @@ class RecallApplication : Application(), Configuration.Provider {
             CleanupWorker.PERIODIC_WORK,
             ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<CleanupWorker>(12, TimeUnit.HOURS).build(),
+        )
+        manager.enqueueUniqueWork(
+            MacHistorySyncWorker.STARTUP_WORK,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<MacHistorySyncWorker>().build(),
+        )
+        manager.enqueueUniquePeriodicWork(
+            MacHistorySyncWorker.PERIODIC_WORK,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<MacHistorySyncWorker>(15, TimeUnit.MINUTES).build(),
         )
     }
 }
